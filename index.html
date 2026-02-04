@@ -1,0 +1,1030 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  updateDoc, 
+  doc,
+  deleteDoc,
+  query
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  ClipboardList, 
+  Package, 
+  Wrench, 
+  ArrowRight, 
+  ChevronRight,
+  ChevronLeft,
+  MessageCircle,
+  Search,
+  Lock,
+  LockOpen,
+  CheckCircle2,
+  Car,
+  Bike,
+  Building2,
+  Monitor,
+  AlertCircle,
+  Loader2,
+  Trash2,
+  Plus,
+  Minus,
+  Camera,
+  LayoutDashboard,
+  Clock,
+  History as HistoryIcon,
+  User,
+  ShieldCheck,
+  Info,
+  Send,
+  CalendarDays,
+  FileText,
+  MapPin,
+  Users,
+  ExternalLink,
+  FileUp,
+  FileSearch,
+  FileSpreadsheet,
+  X,
+  AlertTriangle
+} from 'lucide-react';
+
+// --- Konfigurasi Firebase ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sarpras-v1-9-16';
+
+const ADMIN_PASSCODE = "202601"; 
+const WA_ADMIN_NUMBER = "6285119013939"; 
+const DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1wuN_jHA9oqjn-Ha38W6rtOz0ccwjT7pS6u2ZNtpHkncQqzAdlotX1PPssUY5At5JdsmIlxy6?usp=sharing";
+
+const DAFTAR_UNIT_KERJA = [
+  "Tim Kerja Pengawasan dan Pengendalian",
+  "Tim Kerja Pengangkatan dan Mutasi",
+  "Tim Kerja Sistem Informasi dan Digitalisasi",
+  "Tim Kerja Pembinaan Manajemen ASN",
+  "Tim Kerja Status dan Pemberhentian",
+  "Tata Usaha Sub Bagian Kepegawaian",
+  "Tata Usaha Sub Bagian Perencanaan dan Keuangan",
+  "Tata Usaha Sub Bagian Umum"
+];
+
+const DAFTAR_RUANGAN_PINJAM = [
+  "Aula Hangtuah",
+  "Co-working Space",
+  "R. Serindit (Podcast)",
+  "R. Titian Laksamana",
+  "R. CAT",
+  "R. Makan (Aula)",
+  "Other (Isi Sendiri)"
+];
+
+const DAFTAR_ALAT_KANTOR = [
+  "Laptop",
+  "LCD Proyektor",
+  "Kabel HDMI / VGA",
+  "Sound System Portable",
+  "Mic Wireless",
+  "Printer / Scanner",
+  "Other (Isi Sendiri)"
+];
+
+const DAFTAR_LOKASI_KERUSAKAN = [
+  ...DAFTAR_UNIT_KERJA,
+  "Area Parkir",
+  "Kamar Mandi / Toilet",
+  "Lobby / Resepsionis",
+  "Musholla",
+  "Halaman / Taman",
+  "Other (Isi Sendiri)"
+];
+
+const DAFTAR_DRIVER = ["TIDAK MENGGUNAKAN DRIVER", "Ferian Wahyu", "Gunawan", "Fiqri Satria"];
+const DAFTAR_KENDARAAN_DINAS = [
+  "Mitsubishi Xpander Exceed",
+  "Nissan Xtrail T31",
+  "Toyota Fortuner",
+  "Toyota Kijang Innova 2.0 G M/T Reborn Hitam"
+];
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [passcode, setPasscode] = useState('');
+  const [activeTab, setActiveTab] = useState('home');
+  const [loading, setLoading] = useState(false);
+  
+  // Real-time Data Lists
+  const [peminjamanList, setPeminjamanList] = useState([]);
+  const [permintaanList, setPermintaanList] = useState([]);
+  const [kerusakanList, setKerusakanList] = useState([]);
+  
+  const [notifications, setNotifications] = useState([]);
+  const [publicSearch, setPublicSearch] = useState('');
+  const [adminSearch, setAdminSearch] = useState('');
+  
+  // Date State untuk Export
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const [filterType, setFilterType] = useState('Semua');
+  const [lastSubmitted, setLastSubmitted] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const [formData, setFormData] = useState({
+    nama: '', nip: '', unit: '', sub_kategori: '', jenis_kendaraan: '', 
+    tujuan_kegiatan: '', destinasi: '', ruangan: '', ruangan_custom: '', 
+    lokasi_kerusakan: '', lokasi_custom: '', item: '', jml_penumpang: '', jml_peserta: '',
+    barang_list: [{ item: '', qty: 1, isCustom: false, customName: '' }], 
+    alasan_kebutuhan: '', tgl_mulai: '', tgl_selesai: '', deskripsi: '', evidence: '',
+    evidenceType: '' 
+  });
+
+  const resetForm = useCallback(() => {
+    setFormData({
+      nama: '', nip: '', unit: '', sub_kategori: '', jenis_kendaraan: '',
+      tujuan_kegiatan: '', destinasi: '', ruangan: '', ruangan_custom: '', lokasi_kerusakan: '', lokasi_custom: '',
+      item: '', jml_penumpang: '', jml_peserta: '',
+      barang_list: [{ item: '', qty: 1, isCustom: false, customName: '' }], alasan_kebutuhan: '', 
+      tgl_mulai: '', tgl_selesai: '', deskripsi: '', evidence: '', evidenceType: ''
+    });
+  }, []);
+
+  const addNotification = (title, message, type = 'info') => {
+    const id = Date.now();
+    setNotifications(prev => [{ id, title, message, type }, ...prev]);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
+  };
+
+  const navigateTo = (tabName) => {
+    setActiveTab(tabName);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error("Firebase Auth Error:", err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const syncCollection = (name, setter) => {
+      const q = collection(db, 'artifacts', appId, 'public', 'data', name);
+      return onSnapshot(q, (snapshot) => {
+        setter(snapshot.docs.map(doc => ({ id: doc.id, collectionName: name, ...doc.data() })));
+      }, (err) => console.error(`Error fetching ${name}:`, err));
+    };
+
+    const unsub1 = syncCollection('peminjaman', setPeminjamanList);
+    const unsub2 = syncCollection('permintaan', setPermintaanList);
+    const unsub3 = syncCollection('kerusakan', setKerusakanList);
+
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, [user]);
+
+  const allSubmissions = useMemo(() => {
+    return [...peminjamanList, ...permintaanList, ...kerusakanList]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [peminjamanList, permintaanList, kerusakanList]);
+
+  // --- LOGIC FUNCTIONS ---
+
+  const addItemRow = () => {
+    setFormData(prev => ({ 
+      ...prev, 
+      barang_list: [...prev.barang_list, { item: '', qty: 1, isCustom: false, customName: '' }] 
+    }));
+  };
+
+  const removeItemRow = (index) => {
+    if (formData.barang_list.length > 1) {
+      setFormData(prev => ({ 
+        ...prev, 
+        barang_list: prev.barang_list.filter((_, i) => i !== index) 
+      }));
+    }
+  };
+
+  const updateItemRow = (index, field, value) => {
+    const newList = [...formData.barang_list];
+    if (field === 'item') {
+      newList[index].isCustom = value === "Other (Isi Sendiri)";
+      newList[index].item = value;
+      if (!newList[index].isCustom) newList[index].customName = '';
+    } else {
+      newList[index][field] = value;
+    }
+    setFormData(prev => ({ ...prev, barang_list: newList }));
+  };
+
+  const handleFileUpload = (e, restriction = 'all') => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 500 * 1024) {
+        addNotification("Gagal", "Maksimal file 500KB (Batasan Sistem)", "error");
+        return;
+      }
+      const fileType = file.type;
+      if (restriction === 'image' && !fileType.includes('image')) {
+        addNotification("Gagal", "Hanya format Gambar (JPG/PNG)", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({ ...prev, evidence: reader.result, evidenceType: fileType.includes('pdf') ? 'pdf' : 'image' }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAdminAuth = () => {
+    if (passcode === ADMIN_PASSCODE) {
+      setIsAdmin(true);
+      setShowAdminLogin(false);
+      setPasscode('');
+      navigateTo('admin-dashboard');
+    } else {
+      addNotification("Gagal", "PIN Salah", "error");
+      setPasscode('');
+    }
+  };
+
+  const updateEntryStatus = async (item, newStatus) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', item.collectionName, item.id), { status: newStatus });
+      addNotification("Berhasil", "Status diperbarui", "success");
+    } catch (e) { addNotification("Gagal", "Gagal update status", "error"); }
+  };
+
+  const updateAssetDetail = async (item, field, value) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', item.collectionName, item.id), { [field]: String(value) });
+      addNotification("Berhasil", "Data diperbarui", "success");
+    } catch (e) { addNotification("Gagal", "Gagal update data", "error"); }
+  };
+
+  const initiateDelete = (item) => {
+    setDeleteTarget(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', deleteTarget.collectionName, deleteTarget.id));
+      addNotification("Dihapus", "Data berhasil dihapus", "success");
+      setDeleteTarget(null);
+    } catch (e) { 
+      addNotification("Gagal", "Gagal menghapus data", "error"); 
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateDailyRekapWA = () => {
+    const dailyData = allSubmissions.filter(s => String(s.createdAt || '').split('T')[0] === startDate);
+    if (dailyData.length === 0) return addNotification("Info", "Tidak ada data pada tanggal terpilih", "info");
+
+    const sarpras = dailyData.filter(s => s.collectionName === 'peminjaman');
+    const barang = dailyData.filter(s => s.collectionName === 'permintaan');
+    const rusak = dailyData.filter(s => s.collectionName === 'kerusakan');
+
+    let text = `Izin menyampaikan informasi bahwa tanggal ${startDate} telah masuk Penggunaan BMN dari pegawai. Adapun rincian laporan yang diterima adalah sebagai berikut.\n\n📌 Peminjaman Sarpras\n`;
+
+    if (sarpras.length > 0) {
+      sarpras.forEach((s, i) => {
+        text += `${i+1}) ${s.nama} (${s.unit})\n* Jenis Sarpras: ${s.jenis_kendaraan || s.ruangan || (s.barang_list?.map(b => b.item).join(', '))}\n* Tujuan Kegiatan: ${s.tujuan_kegiatan}\n* Tujuan destinasi: ${s.destinasi || '-'}\n* Tanggal/Waktu Peminjaman: ${String(s.tgl_mulai || '').replace('T', ' ')}\n`;
+        if (s.jml_penumpang) text += `* Jumlah penumpang: ${s.jml_penumpang}\n`;
+        if (s.jml_peserta) text += `* Jumlah Peserta: ${s.jml_peserta}\n`;
+      });
+    } else text += "- Tidak ada laporan\n";
+
+    text += `\n📌 Barang Persediaan\n`;
+    if (barang.length > 0) {
+      barang.forEach((s, i) => {
+        text += `${i+1}) ${s.nama} (${s.unit})\n* Barang: ${s.barang_list?.map(b => `${b.item}(${b.qty})`).join(', ')}\n* Alasan Kebutuhan: ${s.alasan_kebutuhan || '-'}\n`;
+      });
+    } else text += "- Tidak ada laporan\n";
+
+    text += `\n📌 Laporan Kerusakan Sarpras\n`;
+    if (rusak.length > 0) {
+      rusak.forEach((s, i) => {
+        text += `${i+1}) ${s.nama} (${s.unit})\n* Lokasi Kerusakan: ${s.lokasi_kerusakan || '-'}\n* Objek Rusak: ${s.item || '-'}\n* Deskripsi Kerusakan: ${s.deskripsi || '-'}\n* Link Evidence: {BUKTI KERUSAKAN}\n`;
+      });
+    } else text += "- Tidak ada laporan\n";
+
+    text += `\nDemikian laporan yang telah masuk dari pegawai di lingkungan Kanreg XII BKN Pekanbaru. Mohon bantuan rekan-rekan untuk menindaklanjuti sesuai kewenangan masing-masing.\n\nTerima kasih atas kerja samanya.`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const isFormValid = useMemo(() => {
+    const { nama, nip, unit, jenis_kendaraan, tujuan_kegiatan, destinasi, tgl_mulai, tgl_selesai, ruangan, ruangan_custom, barang_list, alasan_kebutuhan, lokasi_kerusakan, lokasi_custom, item, deskripsi, evidence, jml_penumpang, jml_peserta } = formData;
+    if (!nama || nip.length < 18 || !unit) return false;
+
+    switch(activeTab) {
+      case 'form-pinjam-kendaraan': return !!(jenis_kendaraan && tujuan_kegiatan && destinasi && tgl_mulai && tgl_selesai && jml_penumpang);
+      case 'form-pinjam-gedung': return !!((ruangan === "Other (Isi Sendiri)" ? ruangan_custom : ruangan) && tujuan_kegiatan && tgl_mulai && tgl_selesai && jml_peserta);
+      case 'form-pinjam-alat': return !!(barang_list.some(b => b.isCustom ? !!b.customName : !!b.item) && tujuan_kegiatan && tgl_mulai && tgl_selesai);
+      case 'form-barang': return !!(barang_list.some(b => !!b.item) && alasan_kebutuhan);
+      case 'form-rusak': return !!((lokasi_kerusakan === "Other (Isi Sendiri)" ? lokasi_custom : lokasi_kerusakan) && item && deskripsi && evidence);
+      default: return false;
+    }
+  }, [formData, activeTab]);
+
+  const handleSubmit = async (categoryName) => {
+    if (!isFormValid) return;
+    setLoading(true);
+    try {
+      const now = new Date();
+      let finalLoc = "";
+      if (activeTab === 'form-pinjam-gedung') finalLoc = formData.ruangan === "Other (Isi Sendiri)" ? formData.ruangan_custom : formData.ruangan;
+      else if (activeTab === 'form-rusak') finalLoc = formData.lokasi_kerusakan === "Other (Isi Sendiri)" ? formData.lokasi_custom : formData.lokasi_kerusakan;
+
+      const items = formData.barang_list.map(b => ({ item: b.isCustom ? b.customName : b.item, qty: b.qty })).filter(b => b.item);
+
+      const docData = {
+        ...formData,
+        ruangan: activeTab === 'form-pinjam-gedung' ? String(finalLoc) : (formData.ruangan || ''),
+        lokasi_kerusakan: activeTab === 'form-rusak' ? String(finalLoc) : (formData.lokasi_kerusakan || ''),
+        barang_list: (activeTab === 'form-pinjam-alat' || activeTab === 'form-barang') ? items : [],
+        type: categoryName,
+        status: 'Sedang Proses',
+        createdAt: now.toISOString(),
+      };
+
+      const collName = categoryName.includes('pinjam') ? 'peminjaman' : (categoryName === 'permintaan' ? 'permintaan' : 'kerusakan');
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', collName), docData);
+      setLastSubmitted(docData);
+      resetForm();
+    } catch (e) { 
+      console.error(e);
+      addNotification("Gagal", "Gagal menyimpan data", "error"); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  const sendSubmissionToWA = (data) => {
+    if (!data) return;
+    const typeTitle = {
+        'pinjam-kendaraan': 'Peminjaman Kendaraan',
+        'pinjam-ruangan': 'Peminjaman Ruangan',
+        'pinjam-alat': 'Barang/Alat Kantor',
+        'permintaan': 'Permintaan Barang',
+        'kerusakan': 'Laporan Kerusakan'
+    }[data.type];
+
+    const dateFormatted = (data.createdAt || '').split('T')[0];
+    const text = `*FORM PENGAJUAN klikBMN*\n----------------------------------\n*Nama Pemohon:* ${data.nama}\n*Unit Kerja:* ${data.unit}\n*Kategori:* ${typeTitle}\n*Tanggal Permohonan:* ${dateFormatted}\n----------------------------------\n_Mohon untuk segera diproses, Terima kasih._`;
+    window.open(`https://wa.me/${WA_ADMIN_NUMBER}?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const exportExcel = () => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const filtered = allSubmissions.filter(s => {
+        const d = new Date(s.createdAt);
+        const dateMatch = d >= start && d <= end;
+        let typeMatch = false;
+        if (filterType === 'Semua') typeMatch = true;
+        else if (filterType === 'Sarpras') typeMatch = s.collectionName === 'peminjaman';
+        else typeMatch = s.type === filterType;
+        return dateMatch && typeMatch;
+    });
+
+    if (filtered.length === 0) {
+        addNotification("Info", "Tidak ada data pada rentang tanggal ini", "info");
+        return;
+    }
+
+    const tableHeader = `
+      <thead>
+        <tr style="background-color:#4F46E5; color:white; text-align:center;">
+          <th style="padding:10px; border:1px solid #000;">No</th>
+          <th style="padding:10px; border:1px solid #000;">Tanggal Input</th>
+          <th style="padding:10px; border:1px solid #000;">Nama Pemohon</th>
+          <th style="padding:10px; border:1px solid #000;">NIP</th>
+          <th style="padding:10px; border:1px solid #000;">Unit Kerja</th>
+          <th style="padding:10px; border:1px solid #000;">Kategori</th>
+          <th style="padding:10px; border:1px solid #000;">Detail Permintaan</th>
+          <th style="padding:10px; border:1px solid #000;">Tujuan/Alasan</th>
+          <th style="padding:10px; border:1px solid #000;">Tanggal Pelaksanaan</th>
+          <th style="padding:10px; border:1px solid #000;">Status</th>
+          <th style="padding:10px; border:1px solid #000;">Ket. Admin (Driver/Unit)</th>
+        </tr>
+      </thead>
+    `;
+
+    const tableBody = filtered.map((s, index) => {
+       const dateStr = s.createdAt.split('T')[0];
+       let detail = '';
+       if (s.barang_list?.length > 0) detail = s.barang_list.map(b => `${b.item}(${b.qty})`).join('; ');
+       else detail = s.ruangan || s.item || s.jenis_kendaraan || '-';
+
+       const tujuan = s.deskripsi || s.alasan_kebutuhan || s.tujuan_kegiatan || '-';
+       const pelaksanaan = s.tgl_mulai ? `${s.tgl_mulai.replace('T', ' ')} s/d ${s.tgl_selesai.replace('T', ' ')}` : '-';
+       const adminNote = `${s.admin_driver || '-'} / ${s.admin_kendaraan || '-'}`;
+
+       return `
+         <tr>
+           <td style="border:1px solid #000; text-align:center;">${index + 1}</td>
+           <td style="border:1px solid #000; text-align:center;">${dateStr}</td>
+           <td style="border:1px solid #000;">${s.nama}</td>
+           <td style="border:1px solid #000; mso-number-format:'\@';">${s.nip}</td>
+           <td style="border:1px solid #000;">${s.unit}</td>
+           <td style="border:1px solid #000;">${s.type}</td>
+           <td style="border:1px solid #000;">${detail}</td>
+           <td style="border:1px solid #000;">${tujuan}</td>
+           <td style="border:1px solid #000;">${pelaksanaan}</td>
+           <td style="border:1px solid #000;">${s.status}</td>
+           <td style="border:1px solid #000;">${adminNote}</td>
+         </tr>
+       `;
+    }).join('');
+
+    const tableHTML = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+      </head>
+      <body>
+        <h3 style="text-align:center">REKAPITULASI LAYANAN KLIKBMN</h3>
+        <p style="text-align:center">Periode: ${startDate} s/d ${endDate}</p>
+        <table>${tableHeader}<tbody>${tableBody}</tbody></table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([tableHTML], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `Rekap_BMN_${startDate}_sd_${endDate}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col text-left">
+      <nav className="bg-white border-b border-slate-100 py-4 px-6 sticky top-0 z-[100] shadow-sm">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4 cursor-pointer group" onClick={() => navigateTo('home')}>
+             <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg group-hover:scale-110 group-hover:rotate-12 transition-all duration-300">
+                <LayoutDashboard size={22} />
+             </div>
+             <h1 className="text-xl font-black tracking-tighter text-slate-900 group-hover:text-indigo-600 transition-colors">klik<span className="text-indigo-600">BMN</span></h1>
+          </div>
+          <div className="flex gap-4 items-center">
+            <button onClick={() => navigateTo('home')} className={`text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg transition-colors ${activeTab === 'home' ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}>Beranda</button>
+            <button onClick={() => isAdmin ? navigateTo('admin-dashboard') : setShowAdminLogin(true)} className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg transition-all ${activeTab === 'admin-dashboard' ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}>
+              {isAdmin ? <LockOpen size={14} className="text-emerald-500" /> : <Lock size={14} />}
+              <span>Admin</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <div className="fixed top-24 right-6 z-[1000] space-y-3 pointer-events-none text-left">
+        {notifications.map(n => (
+          <div key={n.id} className={`p-4 rounded-xl shadow-xl border bg-white flex items-center gap-3 animate-in slide-in-from-right-10 pointer-events-auto ${n.type === 'error' ? 'border-rose-100 shadow-rose-100/20' : 'border-emerald-100 shadow-emerald-100/20'}`}>
+            <div className={n.type === 'success' ? 'text-emerald-500' : 'text-rose-500'}>{n.type === 'success' ? <CheckCircle2 size={16}/> : <AlertCircle size={16}/>}</div>
+            <p className="text-[10px] font-black text-slate-700 uppercase tracking-tight">{n.message}</p>
+          </div>
+        ))}
+      </div>
+
+      <main className="max-w-7xl mx-auto p-6 md:p-8 w-full flex-grow text-left">
+        {activeTab === 'home' && (
+          <div className="fade-in animate-in fade-in duration-500 text-left">
+            <div className="relative rounded-[3rem] bg-slate-900 overflow-hidden mb-12 p-10 md:p-20 text-white shadow-2xl">
+              <div className="absolute top-0 right-0 -mt-20 -mr-20 w-[30rem] h-[30rem] bg-indigo-600 rounded-full blur-[150px] opacity-30"></div>
+              <div className="relative z-10 max-w-2xl text-left">
+                <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 px-4 py-1.5 rounded-full text-white text-[10px] font-black uppercase tracking-widest mb-6 backdrop-blur-md">Kanreg XII BKN Pekanbaru</div>
+                <h2 className="text-5xl md:text-7xl font-black mb-6 leading-[1] tracking-tighter text-left text-white">Sarpras <span className="text-indigo-400 italic">Digital.</span></h2>
+                <p className="text-slate-400 text-lg font-bold mb-10 leading-relaxed max-w-md text-left">Layanan manajemen aset BMN yang lebih cepat, transparan, dan terukur.</p>
+                <button onClick={() => document.getElementById('grid-layanan').scrollIntoView({behavior: 'smooth', block: 'center'})} className="bg-indigo-600 hover:bg-white text-white hover:text-indigo-600 px-10 py-5 rounded-[2rem] font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-3 shadow-xl text-left">Mulai Pengajuan <ArrowRight size={18} /></button>
+              </div>
+            </div>
+
+            <div id="grid-layanan" className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20 text-left">
+              <LayananCard title="Peminjaman Sarpras" tagline="Mobil, Gedung & Barang" icon={<ClipboardList size={32}/>} color="indigo" onClick={() => navigateTo('sub-pinjam')} />
+              <LayananCard title="Permintaan Barang" tagline="Alat Tulis Kantor" icon={<Package size={32}/>} color="emerald" onClick={() => navigateTo('form-barang')} />
+              <LayananCard title="Laporan Kerusakan" tagline="Fasilitas & Infrastruktur" icon={<Wrench size={32}/>} color="rose" onClick={() => navigateTo('form-rusak')} />
+            </div>
+            
+            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden p-8 md:p-12 text-left">
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10 text-left">
+                  <div>
+                    <h3 className="text-2xl font-black tracking-tighter flex items-center gap-3 mb-1 text-slate-900"><HistoryIcon className="text-indigo-600" size={28} /> Monitoring Publik</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-10 text-left">Status permohonan terkini</p>
+                  </div>
+                  <div className="relative w-full md:w-96 text-left">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                    <input type="text" placeholder="Cari Nama Pemohon..." className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:border-indigo-600 transition-all shadow-sm" value={publicSearch} onChange={(e) => setPublicSearch(e.target.value)} />
+                  </div>
+               </div>
+               <div className="overflow-x-auto text-left">
+                 <table className="w-full text-left">
+                   <thead>
+                     <tr className="border-b border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">
+                       <th className="px-6 py-5 text-left">Pemohon</th>
+                       <th className="px-6 py-5 text-left text-center">Kategori</th>
+                       <th className="px-6 py-5 text-left">Item</th>
+                       <th className="px-6 py-5 text-center text-center">Status</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-50 text-left">
+                     {allSubmissions.filter(s => String(s.nama || '').toLowerCase().includes(publicSearch.toLowerCase())).slice(0, 10).map((item) => (
+                       <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                         <td className="px-6 py-6 font-black text-slate-900 text-sm whitespace-nowrap text-left">{item.nama}<div className="text-[9px] text-slate-400 font-bold uppercase">{item.unit}</div></td>
+                         <td className="px-6 py-6 text-center text-left"><span className="px-3 py-1.5 rounded-lg bg-indigo-50 text-[9px] font-black uppercase text-indigo-600">{item.type?.replace('-', ' ')}</span></td>
+                         <td className="px-6 py-6 font-bold text-xs text-slate-600 text-left">
+                            {item.barang_list?.length > 0 ? item.barang_list.map(b => `${b.item} (${b.qty})`).join(', ') : (item.ruangan || item.item || item.jenis_kendaraan || '-')}
+                         </td>
+                         <td className="px-6 py-6 text-center text-center">
+                            <span className={`px-5 py-2 rounded-full text-[9px] font-black uppercase inline-block min-w-[130px] shadow-sm ${
+                                item.status === 'Selesai' ? 'bg-emerald-500 text-white' : item.status === 'Tidak dapat diproses' ? 'bg-rose-500 text-white' : 'bg-amber-400 text-white'
+                            }`}>{item.status}</span>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- FORM CATEGORY SELECTION --- */}
+        {activeTab === 'sub-pinjam' && (
+           <div className="fade-in text-left">
+              <button onClick={() => navigateTo('home')} className="mb-10 flex items-center gap-3 text-slate-400 font-black text-[11px] uppercase tracking-widest group">
+                 <div className="w-8 h-8 rounded-full bg-white border border-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all"><ChevronLeft size={14}/></div> Kembali
+              </button>
+              <h2 className="text-5xl font-black mb-12 tracking-tighter text-left">Kategori <span className="text-indigo-600">Pinjam.</span></h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
+                <LayananCard title="Kendaraan" tagline="Akomodasi Dinas" icon={<Car size={32}/>} color="indigo" onClick={() => navigateTo('form-pinjam-kendaraan')} />
+                <LayananCard title="Ruangan" tagline="Rapat & Kegiatan" icon={<Building2 size={32}/>} color="indigo" onClick={() => navigateTo('form-pinjam-gedung')} />
+                <LayananCard title="Barang/Alat Kantor" tagline="Elektronik & Inventaris" icon={<Monitor size={32}/>} color="indigo" onClick={() => navigateTo('form-pinjam-alat')} />
+              </div>
+           </div>
+        )}
+
+        {/* --- FORMS --- */}
+        {activeTab === 'form-pinjam-kendaraan' && (
+          <FormWrapper title="Pinjam Kendaraan" icon={<Car className="text-indigo-600" size={24}/>} onBack={() => navigateTo('sub-pinjam')}>
+             <div className="space-y-6 text-left">
+                <div className="flex flex-col md:flex-row gap-4">
+                    <InputGroup label="Nama Pemohon *" value={formData.nama} onChange={v => setFormData({...formData, nama: v})} />
+                    <InputGroup label="NIP (18 Digit) *" type="tel" value={formData.nip} onChange={v => setFormData({...formData, nip: v.replace(/\D/g, '').slice(0, 18)})} />
+                </div>
+                <SelectGroup label="Unit Kerja *" value={formData.unit} options={DAFTAR_UNIT_KERJA} onChange={v => setFormData({...formData, unit: v})} />
+                <div className="space-y-2 text-left">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 leading-none mb-1">Jenis Kendaraan *</label>
+                    <div className="grid grid-cols-2 gap-4">
+                        <button onClick={() => setFormData({...formData, jenis_kendaraan: "Mobil"})} className={`flex flex-col items-center gap-3 p-6 rounded-3xl border-2 transition-all ${formData.jenis_kendaraan === 'Mobil' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-inner' : 'border-slate-100 bg-white text-slate-400'}`}><Car size={28} /><span className="text-[10px] font-black uppercase text-slate-900">Mobil</span></button>
+                        <button onClick={() => setFormData({...formData, jenis_kendaraan: "Motor"})} className={`flex flex-col items-center gap-3 p-6 rounded-3xl border-2 transition-all ${formData.jenis_kendaraan === 'Motor' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-inner' : 'border-slate-100 bg-white text-slate-400'}`}><Bike size={28} /><span className="text-[10px] font-black uppercase text-slate-900">Motor</span></button>
+                    </div>
+                </div>
+                <InputGroup label="Tujuan Kegiatan *" value={formData.tujuan_kegiatan} onChange={v => setFormData({...formData, tujuan_kegiatan: v})} />
+                <InputGroup label="Destinasi *" value={formData.destinasi} onChange={v => setFormData({...formData, destinasi: v})} />
+                <InputGroup label="Jumlah Penumpang * (Orang)" type="number" value={formData.jml_penumpang} onChange={v => setFormData({...formData, jml_penumpang: v})} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <InputGroup label="Waktu Mulai *" type="datetime-local" value={formData.tgl_mulai} onChange={v => setFormData({...formData, tgl_mulai: v})} />
+                    <InputGroup label="Waktu Selesai *" type="datetime-local" value={formData.tgl_selesai} onChange={v => setFormData({...formData, tgl_selesai: v})} />
+                </div>
+                <SubmitButton loading={loading} disabled={!isFormValid} onClick={() => handleSubmit('pinjam-kendaraan')} label="Kirim Pengajuan" color="indigo" />
+             </div>
+          </FormWrapper>
+        )}
+
+        {activeTab === 'form-pinjam-gedung' && (
+          <FormWrapper title="Pinjam Ruangan" icon={<Building2 className="text-indigo-600" size={24}/>} onBack={() => navigateTo('sub-pinjam')}>
+            <div className="space-y-6 text-left">
+              <div className="flex flex-col md:flex-row gap-4 text-left">
+                  <InputGroup label="Nama Pemohon *" value={formData.nama} onChange={v => setFormData({...formData, nama: v})} />
+                  <InputGroup label="NIP (18 Digit) *" type="tel" value={formData.nip} onChange={v => setFormData({...formData, nip: v.replace(/\D/g, '').slice(0, 18)})} />
+              </div>
+              <SelectGroup label="Unit Kerja *" value={formData.unit} options={DAFTAR_UNIT_KERJA} onChange={v => setFormData({...formData, unit: v})} />
+              <SelectGroup label="Ruangan *" value={formData.ruangan} options={DAFTAR_RUANGAN_PINJAM} placeholder="-- Pilih Ruangan --" onChange={v => setFormData({...formData, ruangan: v})} />
+              {formData.ruangan === "Other (Isi Sendiri)" && <InputGroup label="Nama Ruangan Lainnya *" value={formData.ruangan_custom} onChange={v => setFormData({...formData, ruangan_custom: v})} />}
+              <InputGroup label="Tujuan Kegiatan *" value={formData.tujuan_kegiatan} onChange={v => setFormData({...formData, tujuan_kegiatan: v})} />
+              <InputGroup label="Estimasi Peserta *" type="number" value={formData.jml_peserta} onChange={v => setFormData({...formData, jml_peserta: v})} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <InputGroup label="Waktu Mulai *" type="datetime-local" value={formData.tgl_mulai} onChange={v => setFormData({...formData, tgl_mulai: v})} />
+                <InputGroup label="Waktu Selesai *" type="datetime-local" value={formData.tgl_selesai} onChange={v => setFormData({...formData, tgl_selesai: v})} />
+              </div>
+              <SubmitButton loading={loading} disabled={!isFormValid} onClick={() => handleSubmit('pinjam-ruangan')} label="Kirim Pengajuan" color="indigo" />
+            </div>
+          </FormWrapper>
+        )}
+
+        {activeTab === 'form-pinjam-alat' && (
+          <FormWrapper title="Pinjam Barang/Alat Kantor" icon={<Monitor className="text-indigo-600" size={24}/>} onBack={() => navigateTo('sub-pinjam')}>
+            <div className="space-y-6 text-left">
+              <div className="flex flex-col md:flex-row gap-4 text-left">
+                  <InputGroup label="Nama Pemohon *" value={formData.nama} onChange={v => setFormData({...formData, nama: v})} />
+                  <InputGroup label="NIP (18 Digit) *" type="tel" value={formData.nip} onChange={v => setFormData({...formData, nip: v.replace(/\D/g, '').slice(0, 18)})} />
+              </div>
+              <SelectGroup label="Unit Kerja *" value={formData.unit} options={DAFTAR_UNIT_KERJA} onChange={v => setFormData({...formData, unit: v})} />
+              <div className="space-y-4 text-left">
+                  <div className="flex justify-between items-center text-left">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest text-left">Daftar Barang/Alat *</span>
+                    <button onClick={addItemRow} className="text-[9px] font-black text-indigo-600 uppercase bg-indigo-50 px-3 py-1.5 rounded-full hover:bg-indigo-600 hover:text-white transition-all"><Plus size={12} className="inline mr-1"/> Tambah Baris</button>
+                  </div>
+                  {formData.barang_list.map((item, idx) => (
+                    <div key={idx} className="space-y-3 animate-in fade-in duration-300">
+                        <div className="flex gap-3 items-center">
+                            <div className="flex-grow text-left">
+                              <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none shadow-sm focus:border-indigo-600 transition-all text-slate-700" value={item.item || ''} onChange={e => updateItemRow(idx, 'item', e.target.value)}>
+                                <option value="">-- Pilih --</option>
+                                {DAFTAR_ALAT_KANTOR.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                            <div className="w-20 text-left"><input type="number" min="1" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center outline-none shadow-sm shadow-indigo-100/10" value={item.qty || 1} onChange={e => updateItemRow(idx, 'qty', parseInt(e.target.value) || 1)} /></div>
+                            <button onClick={() => removeItemRow(idx)} className="text-slate-300 hover:text-rose-500 transition-colors shadow-sm"><Minus size={18}/></button>
+                        </div>
+                        {item.isCustom && <input type="text" placeholder="Sebutkan item lainnya... *" className="w-full p-4 bg-white border-2 border-indigo-200 rounded-2xl font-bold text-xs outline-none focus:border-indigo-600 transition-all shadow-sm" value={item.customName || ''} onChange={e => updateItemRow(idx, 'customName', e.target.value)} />}
+                    </div>
+                  ))}
+              </div>
+              <InputGroup label="Tujuan Penggunaan *" value={formData.tujuan_kegiatan} onChange={v => setFormData({...formData, tujuan_kegiatan: v})} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <InputGroup label="Waktu Mulai *" type="datetime-local" value={formData.tgl_mulai} onChange={v => setFormData({...formData, tgl_mulai: v})} />
+                <InputGroup label="Waktu Selesai *" type="datetime-local" value={formData.tgl_selesai} onChange={v => setFormData({...formData, tgl_selesai: v})} />
+              </div>
+              <SubmitButton loading={loading} disabled={!isFormValid} onClick={() => handleSubmit('pinjam-alat')} label="Kirim Pengajuan" color="indigo" />
+            </div>
+          </FormWrapper>
+        )}
+
+        {activeTab === 'form-barang' && (
+          <FormWrapper title="Permintaan Barang" icon={<Package className="text-emerald-600" size={24}/>} onBack={() => navigateTo('home')}>
+             <div className="space-y-6 text-left">
+                <div className="flex flex-col md:flex-row gap-4 text-left">
+                    <InputGroup label="Nama Pemohon *" value={formData.nama} onChange={v => setFormData({...formData, nama: v})} />
+                    <InputGroup label="NIP (18 Digit) *" type="tel" value={formData.nip} onChange={v => setFormData({...formData, nip: v.replace(/\D/g, '').slice(0, 18)})} />
+                </div>
+                <SelectGroup label="Unit Kerja *" value={formData.unit} options={DAFTAR_UNIT_KERJA} onChange={v => setFormData({...formData, unit: v})} />
+                <div className="space-y-4 text-left">
+                  <div className="flex justify-between items-center text-left">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest text-left">Daftar Barang *</span>
+                    <button onClick={addItemRow} className="text-[9px] font-black text-emerald-600 uppercase bg-emerald-50 px-3 py-1.5 rounded-full hover:bg-emerald-600 hover:text-white transition-all"><Plus size={12} className="inline mr-1"/> Tambah Baris</button>
+                  </div>
+                  {formData.barang_list.map((item, idx) => (
+                    <div key={idx} className="flex gap-3 items-center animate-in slide-in-from-right-2 duration-300">
+                        <div className="flex-grow text-left"><input type="text" placeholder="Nama Barang (contoh: Kertas A4 Rim) *" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:border-emerald-600 shadow-sm shadow-emerald-100/10" value={item.item || ''} onChange={e => updateItemRow(idx, 'item', e.target.value)} /></div>
+                        <div className="w-20 text-left"><input type="number" min="1" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center outline-none shadow-sm shadow-emerald-100/10" value={item.qty || 1} onChange={e => updateItemRow(idx, 'qty', parseInt(e.target.value) || 1)} /></div>
+                        <button onClick={() => removeItemRow(idx)} className="text-slate-300 hover:text-rose-500 transition-colors shadow-sm"><Minus size={18}/></button>
+                    </div>
+                  ))}
+                </div>
+                <InputGroup label="Alasan Kebutuhan *" value={formData.alasan_kebutuhan} onChange={v => setFormData({...formData, alasan_kebutuhan: v})} />
+                <FileUpload label="Contoh Barang (PDF/Gambar - Max 2MB) - Opsional" evidence={formData.evidence} type="all" onUpload={(e) => handleFileUpload(e, 'all')} />
+                <SubmitButton loading={loading} disabled={!isFormValid} onClick={() => handleSubmit('permintaan')} label="Ajukan Barang" color="emerald" />
+             </div>
+          </FormWrapper>
+        )}
+
+        {activeTab === 'form-rusak' && (
+          <FormWrapper title="Laporan Kerusakan" icon={<Wrench className="text-rose-600" size={24}/>} onBack={() => navigateTo('home')}>
+             <div className="space-y-6 text-left text-left">
+                <div className="flex flex-col md:flex-row gap-4 text-left text-left">
+                    <InputGroup label="Nama Pelapor *" value={formData.nama} onChange={v => setFormData({...formData, nama: v})} />
+                    <InputGroup label="NIP (18 Digit) *" type="tel" value={formData.nip} onChange={v => setFormData({...formData, nip: v.replace(/\D/g, '').slice(0, 18)})} />
+                </div>
+                <SelectGroup label="Unit Kerja *" value={formData.unit} options={DAFTAR_UNIT_KERJA} onChange={v => setFormData({...formData, unit: v})} />
+                <SelectGroup label="Lokasi Kerusakan *" value={formData.lokasi_kerusakan} options={DAFTAR_LOKASI_KERUSAKAN} placeholder="-- Pilih --" onChange={v => setFormData({...formData, lokasi_kerusakan: v})} />
+                {formData.lokasi_kerusakan === "Other (Isi Sendiri)" && <InputGroup label="Nama Lokasi Lainnya *" value={formData.lokasi_custom} onChange={v => setFormData({...formData, lokasi_custom: v})} />}
+                <InputGroup label="Objek yang Rusak *" value={formData.item} onChange={v => setFormData({...formData, item: v})} />
+                <div className="space-y-2 text-left text-left text-left">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-left text-left leading-none text-left">Deskripsi Detail Kerusakan *</label>
+                    <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-sm text-slate-700 min-h-[120px] focus:border-rose-600 shadow-sm" placeholder="Contoh: AC tidak dingin sejak pagi hari..." value={formData.deskripsi} onChange={e => setFormData({...formData, deskripsi: e.target.value})} />
+                </div>
+                <FileUpload label="Foto Bukti Kerusakan * (Wajib)" evidence={formData.evidence} type="image" onUpload={(e) => handleFileUpload(e, 'image')} />
+                <SubmitButton loading={loading} disabled={!isFormValid} onClick={() => handleSubmit('kerusakan')} label="Kirim Laporan" color="rose" />
+             </div>
+          </FormWrapper>
+        )}
+
+        {/* --- ADMIN DASHBOARD --- */}
+        {activeTab === 'admin-dashboard' && isAdmin && (
+          <div className="fade-in space-y-10 animate-in slide-in-from-bottom-6 duration-500 text-left text-left text-left text-left">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-left text-left text-left">
+              <div className="text-left text-left text-left">
+                <h2 className="text-4xl font-black tracking-tighter text-slate-900 leading-none text-left">Dashboard <span className="text-indigo-600 text-left">Admin.</span></h2>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mt-1 flex items-center gap-2 text-left leading-none"><LockOpen size={12}/> Manajemen Seluruh Data Permohonan</p>
+              </div>
+              <div className="flex gap-4 text-left">
+                <button onClick={generateDailyRekapWA} className="flex items-center gap-2 bg-amber-500 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase shadow-lg hover:bg-amber-600 transition-all shadow-sm shadow-sm"><CalendarDays size={16}/> Rekap Harian (WA)</button>
+                <button onClick={exportExcel} className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase shadow-lg hover:bg-emerald-700 transition-all shadow-sm shadow-sm"><FileSpreadsheet size={16}/> Export Sheet</button>
+                <button onClick={() => { setIsAdmin(false); navigateTo('home'); }} className="bg-rose-50 text-rose-600 px-6 py-3 rounded-2xl font-black text-[10px] uppercase border border-rose-100 hover:bg-rose-100 transition-all transition-all">Logout</button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm p-6 overflow-hidden space-y-4 shadow-sm shadow-sm">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10 text-left">
+                <div className="bg-slate-50 p-4 rounded-2xl text-left text-left text-left shadow-sm">
+                  <label className="text-[9px] font-black uppercase text-slate-400 text-left leading-none mb-2 block text-left text-left text-left">Dari Tanggal</label>
+                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-transparent outline-none font-bold text-sm text-slate-700 shadow-sm shadow-sm" />
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl text-left text-left text-left shadow-sm">
+                  <label className="text-[9px] font-black uppercase text-slate-400 text-left leading-none mb-2 block text-left text-left text-left">Sampai Tanggal</label>
+                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-transparent outline-none font-bold text-sm text-slate-700 shadow-sm shadow-sm" />
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl text-left col-span-2 text-left text-left text-left text-left text-left shadow-sm">
+                  <label className="text-[9px] font-black uppercase text-slate-400 text-left text-left leading-none mb-2 block text-left text-left text-left text-left text-left">Kategori Filter</label>
+                  <select value={filterType} onChange={e => setFilterType(e.target.value)} className="w-full bg-transparent outline-none font-bold text-sm text-slate-700 appearance-none text-left shadow-sm">
+                      <option value="Semua">-- Pilih --</option>
+                      <option value="Sarpras">Peminjaman Sarpras (Gabungan)</option>
+                      <option value="pinjam-kendaraan">Pinjam Kendaraan</option>
+                      <option value="pinjam-ruangan">Pinjam Ruangan</option>
+                      <option value="pinjam-alat">Barang/Alat Kantor</option>
+                      <option value="permintaan">Permintaan Barang</option>
+                      <option value="kerusakan">Laporan Kerusakan</option>
+                  </select>
+                </div>
+                <div className="bg-indigo-600 p-4 rounded-2xl text-white flex flex-col justify-center text-left shadow-lg text-left shadow-sm shadow-sm shadow-sm">
+                    <div className="text-[9px] font-black uppercase opacity-60 text-left text-left text-left">Total Terdeteksi</div>
+                    <div className="text-2xl font-black leading-none text-left text-left text-left">{allSubmissions.filter(s => {
+                        const d = s.createdAt.split('T')[0];
+                        return d >= startDate && d <= endDate;
+                    }).length} Data</div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 text-left">
+              {allSubmissions.filter(s => {
+                  const d = String(s.createdAt || '').split('T')[0];
+                  const dateMatch = d >= startDate && d <= endDate;
+                  let typeMatch = true;
+                  if (filterType === 'Sarpras') typeMatch = s.collectionName === 'peminjaman';
+                  else if (filterType !== 'Semua') typeMatch = s.type === filterType;
+                  return dateMatch && typeMatch;
+              }).map(item => (
+                <div key={item.id} className="p-8 rounded-[3rem] border border-slate-100 flex flex-col md:flex-row justify-between gap-8 bg-white hover:border-indigo-100 transition-all group text-left shadow-sm shadow-sm">
+                    <div className="flex-grow space-y-4 text-left text-left text-left">
+                        <div className="flex items-center gap-3 text-left text-left">
+                            <span className="px-3 py-1 rounded bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase border border-indigo-100 shadow-sm shadow-sm">
+                              {item.type === 'pinjam-alat' ? 'Barang/Alat Kantor' : String(item.type || '').replace('-', ' ')}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest flex items-center gap-1 leading-none shadow-sm text-left text-left shadow-sm shadow-sm shadow-sm"><Clock size={12}/> {String(item.createdAt || '').split('T')[1]?.slice(0,5)} WIB</span>
+                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest flex items-center gap-1 leading-none shadow-sm text-left text-left shadow-sm shadow-sm shadow-sm">{String(item.createdAt || '').split('T')[0]}</span>
+                        </div>
+                        <h4 className="text-2xl font-black text-slate-900 leading-none text-left text-left text-left shadow-sm shadow-sm">{String(item.nama)}</h4>
+                        <div className="flex flex-wrap gap-4 text-left text-left text-left shadow-sm shadow-sm">
+                            <div className="flex items-center gap-1 text-[10px] font-black text-slate-500 uppercase text-left text-left text-left shadow-sm shadow-sm"><User size={14} className="text-slate-400"/> NIP: {String(item.nip || '-')}</div>
+                            <div className="flex items-center gap-1 text-[10px] font-black text-slate-500 uppercase text-left text-left text-left shadow-sm shadow-sm"><Building2 size={14} className="text-slate-400"/> {String(item.unit)}</div>
+                        </div>
+                        
+                        <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 text-xs font-bold text-slate-700 grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-12 shadow-inner text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm text-left">
+                            <AdminDetailRow label="Detail Pengajuan" value={item.barang_list?.length > 0 ? item.barang_list.map(b => `${b.item}(${b.qty})`).join(', ') : String(item.ruangan || item.item || item.jenis_kendaraan || '-')} />
+                            {item.tgl_mulai && <AdminDetailRow label="Waktu/Jadwal" value={`${String(item.tgl_mulai).replace('T', ' ')} s/d ${String(item.tgl_selesai || '').replace('T', ' ')}`} highlight />}
+                            {item.destinasi && <AdminDetailRow label="Destinasi" value={String(item.destinasi)} />}
+                            {item.jml_penumpang && <AdminDetailRow label="Jumlah Penumpang" value={`${item.jml_penumpang} Orang`} />}
+                            {item.jml_peserta && <AdminDetailRow label="Jumlah Peserta" value={`${item.jml_peserta} Orang`} />}
+                            {item.deskripsi && <AdminDetailRow label="Keterangan" value={String(item.deskripsi)} />}
+                        </div>
+
+                        {item.type === 'pinjam-kendaraan' && item.jenis_kendaraan === 'Mobil' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-indigo-50/50 rounded-3xl border border-indigo-100 animate-in slide-in-from-top-4 text-left shadow-sm shadow-sm shadow-sm shadow-sm">
+                                <div className="space-y-2 text-left text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm">
+                                    <label className="text-[9px] font-black uppercase text-indigo-500 flex items-center gap-1 leading-none mb-1 text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><User size={10}/> Penugasan Driver</label>
+                                    <select 
+                                        className="w-full bg-white border-2 border-indigo-100 p-3 rounded-xl font-bold text-[11px] outline-none shadow-sm focus:border-indigo-600 transition-all text-slate-700 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"
+                                        value={String(item.admin_driver || '')} 
+                                        onChange={e => updateAssetDetail(item, 'admin_driver', e.target.value)}
+                                    >
+                                        <option value="">-- Pilih --</option>
+                                        {DAFTAR_DRIVER.map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2 text-left text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+                                    <label className="text-[9px] font-black uppercase text-indigo-500 flex items-center gap-1 leading-none mb-1 text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><ShieldCheck size={10}/> Unit Kendaraan</label>
+                                    <select 
+                                        className="w-full bg-white border-2 border-indigo-100 p-3 rounded-xl font-bold text-[11px] outline-none shadow-sm focus:border-indigo-600 transition-all text-slate-700 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"
+                                        value={String(item.admin_kendaraan || '')} 
+                                        onChange={e => updateAssetDetail(item, 'admin_kendaraan', e.target.value)}
+                                    >
+                                        <option value="">-- Pilih --</option>
+                                        {DAFTAR_KENDARAAN_DINAS.map(v => <option key={v} value={v}>{v}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+
+                        {item.evidence && (
+                            <div className="pt-2 text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm">
+                                <div className="text-[9px] font-black text-slate-400 uppercase mb-2 flex items-center gap-1 leading-none text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm"><FileSearch size={12}/> Lampiran / Evidence:</div>
+                                {item.evidenceType === 'pdf' ? (
+                                    <button onClick={() => window.open(item.evidence)} className="p-4 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl flex items-center gap-3 font-black text-[10px] uppercase shadow-sm leading-none shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><FileText size={20}/> Lihat Dokumen PDF</button>
+                                ) : (
+                                    <img src={item.evidence} className="h-44 rounded-[2rem] border-4 border-white shadow-xl cursor-zoom-in object-cover text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" alt="Lampiran" onClick={() => window.open(item.evidence)} />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex flex-col justify-between items-end gap-6 min-w-[220px] text-left">
+                        <div className="flex flex-wrap gap-2 justify-end text-left text-left text-left text-left shadow-sm shadow-sm">
+                            <button onClick={() => updateEntryStatus(item, 'Selesai')} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase border transition-all ${item.status === 'Selesai' ? 'bg-emerald-500 text-white border-emerald-600 shadow-md shadow-emerald-100 shadow-sm shadow-sm' : 'bg-white text-slate-400 hover:text-emerald-500 hover:border-emerald-100 transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm'}`}>Selesai</button>
+                            <button onClick={() => updateEntryStatus(item, 'Sedang Proses')} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase border transition-all ${item.status === 'Sedang Proses' ? 'bg-amber-400 text-white border-amber-500 shadow-md shadow-amber-100 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm' : 'bg-white text-slate-400 hover:text-amber-500 hover:border-amber-100 transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm'}`}>Proses</button>
+                            <button onClick={() => updateEntryStatus(item, 'Tidak dapat diproses')} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase border transition-all ${item.status === 'Tidak dapat diproses' ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-100 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm' : 'bg-white text-slate-400 hover:text-rose-500 hover:border-rose-100 transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm'}`}>Tolak</button>
+                        </div>
+                        <button onClick={() => initiateDelete(item)} className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><Trash2 size={20}/></button>
+                    </div>
+                </div>
+              ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* --- MODALS & OVERLAYS --- */}
+      
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
+            <div className="bg-white w-full max-w-sm p-8 rounded-[2.5rem] shadow-2xl text-center border border-slate-100 scale-in duration-200">
+                <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><AlertTriangle size={32} /></div>
+                <h3 className="text-xl font-black mb-2 text-slate-900">Hapus Data?</h3>
+                <p className="text-slate-500 text-xs font-bold mb-8 leading-relaxed">Tindakan ini tidak dapat dibatalkan. Data akan hilang permanen dari database.</p>
+                <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => setDeleteTarget(null)} className="py-3 rounded-xl font-black text-[10px] uppercase bg-slate-50 text-slate-500 hover:bg-slate-100 transition-all">Batal</button>
+                    <button onClick={confirmDelete} className="py-3 rounded-xl font-black text-[10px] uppercase bg-rose-600 text-white hover:bg-rose-700 transition-all shadow-lg shadow-rose-200">Ya, Hapus</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {showAdminLogin && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md text-center text-center">
+           <div className="bg-white w-full max-sm:max-w-xs max-w-sm p-12 rounded-[3.5rem] shadow-2xl relative border border-slate-100 text-center text-center shadow-sm">
+             <div className="w-20 h-20 bg-indigo-600 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-indigo-200 shadow-xl shadow-sm shadow-sm shadow-sm shadow-sm"><Lock size={36} /></div>
+             <h3 className="text-2xl font-black mb-2 tracking-tighter text-slate-900 text-center leading-none text-center text-center text-center text-center">Akses Admin</h3>
+             <input type="password" maxLength={6} className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-3xl mb-8 text-center text-4xl font-black tracking-[0.4em] focus:border-indigo-600 outline-none transition-all shadow-inner text-slate-700 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" value={passcode} onChange={e => setPasscode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdminAuth()} placeholder="••••••" />
+             <div className="space-y-4 text-center text-center text-center shadow-sm">
+                <button onClick={handleAdminAuth} className="w-full bg-slate-900 text-white py-5 rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-lg shadow-slate-900/10 transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">Masuk</button>
+                <button onClick={() => { setShowAdminLogin(false); setPasscode(''); }} className="text-slate-400 font-black text-[10px] uppercase tracking-widest transition-colors py-2 w-full text-center hover:text-rose-500 transition-all transition-all transition-all shadow-sm">Batal</button>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {lastSubmitted && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 text-center text-center">
+              <div className="bg-white w-full max-w-sm p-10 rounded-[3rem] shadow-2xl text-center border border-slate-50 shadow-indigo-200/50 shadow-sm shadow-sm shadow-sm">
+                  <div className="w-20 h-20 bg-emerald-500 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-xl shadow-emerald-100 shadow-emerald-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><CheckCircle2 size={40} /></div>
+                  <h3 className="text-2xl font-black mb-2 tracking-tighter text-slate-900 text-center uppercase leading-none text-center text-center text-center text-center shadow-sm shadow-sm">Berhasil Terkirim!</h3>
+                  <p className="text-slate-400 text-sm font-bold mb-8 leading-tight text-center text-center text-center text-center shadow-sm shadow-sm">Sampaikan tanda bukti ke WhatsApp Admin BKN untuk proses lebih cepat.</p>
+                  <div className="space-y-4 text-center text-center text-center text-center shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+                      <button onClick={() => sendSubmissionToWA(lastSubmitted)} className="w-full bg-emerald-600 text-white py-5 rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-700 transition-all shadow-emerald-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><Send size={16}/> Kirim ke WhatsApp</button>
+                      <button onClick={() => { setLastSubmitted(null); navigateTo('home'); }} className="w-full bg-slate-100 text-slate-500 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest text-center hover:bg-slate-200 transition-colors shadow-sm shadow-sm shadow-sm shadow-sm">Selesai</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      <footer className="py-16 px-8 border-t border-slate-100 bg-white mt-auto text-left text-left text-left">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-12 text-left text-left text-left text-left">
+           <div className="text-left text-left text-left text-left">
+              <h4 className="font-black text-xl tracking-tighter mb-2 text-slate-900 leading-none italic text-left text-left text-left text-left">klikBMN</h4>
+              <h5 className="font-black text-slate-400 text-[10px] uppercase tracking-widest mb-1 text-left leading-none text-left text-left text-left text-left shadow-sm">Kanreg XII BKN Pekanbaru</h5>
+              <p className="text-[10px] font-bold text-slate-300 uppercase text-left tracking-widest leading-none text-left text-left text-left shadow-sm">Internal Asset Management System v1.9.9</p>
+           </div>
+           <a href={`https://wa.me/${WA_ADMIN_NUMBER}`} target="_blank" rel="noreferrer" className="flex items-center gap-4 bg-white border border-slate-100 p-2 pr-8 rounded-full transition-all shadow-sm hover:border-emerald-500 hover:shadow-lg group shadow-indigo-100/50 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+              <div className="w-14 h-14 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-500 shadow-emerald-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><MessageCircle size={24} /></div>
+              <div className="text-left text-left text-left text-left">
+                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1 text-left text-left text-left text-left">Butuh Bantuan?</div>
+                  <div className="text-xs font-black text-slate-700 text-left text-left text-left text-left shadow-sm shadow-sm">Hubungi Admin BMN</div>
+              </div>
+           </a>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+// COMPONENT HELPERS
+const LayananCard = ({ title, tagline, icon, color, onClick }) => {
+    const colors = { 
+        indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100 shadow-indigo-100/50 shadow-sm shadow-sm shadow-sm shadow-sm', 
+        emerald: 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-100/50 shadow-sm shadow-sm shadow-sm shadow-sm', 
+        rose: 'bg-rose-50 text-rose-600 border-rose-100 shadow-rose-100/50 shadow-sm shadow-sm shadow-sm shadow-sm' 
+    };
+    return (
+        <button onClick={onClick} className="group bg-white p-10 rounded-[3.5rem] border border-slate-100 text-left flex flex-col items-center hover:shadow-2xl hover:-translate-y-3 transition-all w-full relative overflow-hidden shadow-sm shadow-indigo-100/20 shadow-sm shadow-sm shadow-sm shadow-sm">
+            <div className={`mb-8 p-8 rounded-[2rem] border-2 transition-all group-hover:rotate-6 group-hover:scale-110 ${colors[color]} shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm`}>{icon}</div>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 tracking-tight text-center leading-none text-center text-center text-center text-center shadow-sm shadow-sm">{title}</h3>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-10 text-center leading-none italic text-center text-center text-center text-center shadow-sm shadow-sm shadow-sm">{tagline}</p>
+            <div className="w-12 h-12 rounded-full flex items-center justify-center bg-slate-50 text-slate-300 group-hover:bg-slate-900 group-hover:text-white transition-all shadow-inner shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><ChevronRight className="rotate-180" size={20} /></div>
+        </button>
+    );
+};
+
+const FormWrapper = ({ title, icon, children, onBack }) => (
+    <div className="max-w-3xl mx-auto pb-20 fade-in text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+        <div className="bg-white rounded-[4rem] border border-slate-100 shadow-2xl p-10 md:p-16 relative shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+            <button onClick={onBack} className="mb-8 flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-indigo-600 transition-colors transition-all transition-all transition-all transition-all transition-all transition-all shadow-sm"><ChevronLeft size={16}/> Kembali</button>
+            <div className="flex items-center gap-5 mb-12 text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+                <div className="p-5 bg-slate-50 rounded-3xl shadow-sm text-indigo-600 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">{icon}</div>
+                <div className="text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+                    <h2 className="text-3xl font-black tracking-tighter leading-none mb-1 text-slate-900 text-left text-left text-left text-left text-left shadow-sm">{title}</h2>
+                    <div className="flex items-center gap-1.5 text-rose-500 font-black text-[9px] uppercase tracking-widest text-left leading-none text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><Info size={12}/> Mohon lengkapi semua kolom bertanda (*)</div>
+                </div>
+            </div>
+            {children}
+        </div>
+    </div>
+);
+
+const InputGroup = ({ label, value, onChange, placeholder, type = "text" }) => (
+    <div className="space-y-2 text-left flex-1 text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">
+        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-left leading-none text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">{label}</label>
+        <input type={type} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:border-indigo-600 focus:bg-white outline-none transition-all font-bold text-sm text-slate-700 shadow-sm shadow-indigo-100/10 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" placeholder={placeholder || `Ketik disini...`} value={String(value || '')} onChange={e => onChange(e.target.value)} />
+    </div>
+);
+
+const SelectGroup = ({ label, value, options, onChange, placeholder }) => (
+    <div className="space-y-2 text-left flex-1 text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">
+        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-left leading-none text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">{label}</label>
+        <div className="relative text-left text-left text-left text-left text-left text-left shadow-sm shadow-sm shadow-sm">
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none appearance-none cursor-pointer font-bold text-sm text-slate-700 shadow-sm focus:border-indigo-600 transition-all shadow-indigo-100/10 transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" value={value || ''} onChange={e => onChange(e.target.value)}>
+                <option value="">{placeholder || `-- Pilih --`}</option>
+                {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none group-focus:rotate-180 transition-transform duration-300 transition-all shadow-sm"><ChevronRight size={16} className="rotate-90 shadow-sm shadow-sm" /></div>
+        </div>
+    </div>
+);
+
+const FileUpload = ({ label, evidence, type, onUpload }) => (
+  <div className="space-y-2 text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">
+    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-left leading-none text-left text-left text-left text-left text-left text-left text-left text-left text-left shadow-sm">{label}</label>
+    <div className="relative border-2 border-dashed border-slate-200 rounded-[2.5rem] p-10 text-center bg-slate-50 hover:bg-white transition-all cursor-pointer overflow-hidden shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+      <input type="file" accept={type === 'image' ? 'image/*' : 'image/*,application/pdf'} onChange={onUpload} className="absolute inset-0 opacity-0 cursor-pointer z-10 shadow-sm shadow-sm shadow-sm shadow-sm" />
+      {evidence ? (
+        <div className="space-y-4 text-center text-center text-center text-center shadow-sm">
+          {String(evidence).includes('application/pdf') || String(evidence).startsWith('data:application/pdf') ? <div className="p-6 bg-rose-50 text-rose-500 rounded-3xl mx-auto w-fit shadow-sm shadow-rose-200/50 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm"><FileUp size={48}/></div> : <img src={String(evidence)} alt="Preview" className="h-40 rounded-3xl mx-auto shadow-xl border-4 border-white shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" />}
+          <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none text-center text-center text-center text-center text-center shadow-sm shadow-sm shadow-sm shadow-sm">File Berhasil Dimuat</p>
+        </div>
+      ) : (
+        <div className="space-y-4 text-slate-300 text-center text-center text-center text-center shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+          <div className="bg-white p-6 rounded-3xl inline-block shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">
+            <FileUp size={48} className="text-slate-200 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm" />
+          </div>
+          <p className="text-[11px] font-black uppercase tracking-widest leading-tight text-center text-center text-center text-center text-center text-center text-center text-center shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm">Ketuk Untuk Memilih File<br/><span className="text-[9px] opacity-60 text-center shadow-sm shadow-sm shadow-sm">Maksimal Ukuran 2MB</span></p>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
+const AdminDetailRow = ({ label, value, highlight }) => (
+    <div className="flex flex-col gap-1 text-left text-left text-left text-left text-left text-left text-left">
+        <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-left leading-none text-left text-left text-left text-left text-left text-left shadow-sm">{label}</div>
+        <div className={`text-xs font-bold text-left leading-tight text-left text-left text-left text-left text-left text-left ${highlight ? 'text-indigo-600' : 'text-slate-700 shadow-sm shadow-sm'}`}>{String(value || '-')}</div>
+    </div>
+);
+
+const SubmitButton = ({ loading, onClick, label, color, disabled }) => {
+    const colors = { indigo: 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100 shadow-indigo-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm', emerald: 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100 shadow-emerald-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm', rose: 'bg-rose-600 hover:bg-rose-700 shadow-rose-100 shadow-rose-600/20 shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm' };
+    const buttonColorClass = disabled ? 'bg-slate-400 shadow-none cursor-not-allowed shadow-none shadow-none shadow-none shadow-none shadow-none shadow-none shadow-none shadow-none' : colors[color];
+
+    return (
+        <button 
+          onClick={onClick} 
+          disabled={loading || disabled} 
+          className={`w-full py-6 rounded-[2rem] text-white font-black uppercase text-[11px] tracking-widest transition-all shadow-xl flex items-center justify-center gap-3 mt-10 hover:scale-[1.01] active:scale-95 transition-all shadow-sm ${buttonColorClass} disabled:opacity-80 transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all transition-all shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm shadow-sm`}
+        >
+            {loading ? <Loader2 className="animate-spin shadow-sm shadow-sm shadow-sm shadow-sm" size={20} /> : label} <ArrowRight size={20} className="shadow-sm shadow-sm shadow-sm shadow-sm" />
+        </button>
+    );
+};
+
+export default App;
